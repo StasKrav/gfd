@@ -30,11 +30,28 @@ class FileManager:
         curses.curs_set(0)  # Скрываем курсор
         curses.start_color()
         curses.use_default_colors()
-        curses.init_pair(1, curses.COLOR_BLACK, curses.COLOR_RED)   # курсор
-        curses.init_pair(2, curses.COLOR_RED, -1)                   # директории
-        curses.init_pair(3, curses.COLOR_GREEN, -1)                 # исполняемые
-        curses.init_pair(4, curses.COLOR_CYAN, curses.COLOR_BLACK)  # символические ссылки
-        curses.init_pair(5, curses.COLOR_YELLOW, -1)  # выделенные файлы
+
+    # Кастомные цвета
+        curses.init_color(10, 400, 400, 600)  # пастельно-синий
+        curses.init_color(11, 500, 500, 500)  # серый
+        curses.init_color(12, 550, 500, 300)  # фисташковый
+        curses.init_color(13, 1000, 800, 200)  # жёлто-оранжевый
+        curses.init_color(14, 300, 300, 300)   # мягкий серый
+        curses.init_color(15, 950, 900, 700)    # курсор
+        curses.init_color(16, 320, 320, 320) # <--- НОВЫЙ ЦВЕТ: для обычных файлов
+    
+    # Пары цветов
+        curses.init_pair(1, 15, -1)    # курсор
+        curses.init_pair(2, 11, -1)  # директории
+        curses.init_pair(3, 12, -1)  # фисташковый (для исполняемых)
+        curses.init_pair(4, 10, -1)  # ссылки — пастельный синий
+        curses.init_pair(5, curses.COLOR_YELLOW, -1) # выделенные
+        curses.init_pair(6, curses.COLOR_GREEN, -1)  # copy
+        curses.init_pair(7, 13, -1)   # move — жёлто-оранжевый
+        curses.init_pair(8, curses.COLOR_RED, -1)    # delete
+        curses.init_pair(9, 14, -1)   # сообщения — мягкий серый
+        curses.init_pair(10, 16, -1)  # <--- НОВАЯ ПАРА: для обычных файлов (использует цвет 16)
+            
 
         # Буфер (clipboard) для copy/move
         # хранит список полных путей и действие: 'copy' или 'move'
@@ -66,7 +83,7 @@ class FileManager:
             clipboard_info = f" | Clipboard: {len(self.clipboard)} item(s) [{self.clipboard_action}]"
         header = f" GFD - {self.current_dir} {clipboard_info} "
         try:
-            self.stdscr.addstr(0, 0, header[:self.width-1], curses.A_REVERSE)
+            self.stdscr.addstr(0, 0, header[:self.width-1], curses.A_NORMAL)
         except curses.error:
             pass
 
@@ -76,23 +93,23 @@ class FileManager:
             file_name = self.files[i]
             full_path = os.path.join(self.current_dir, file_name)
 
-            # Определяем цвет
+            # Определяем цвет строки (для курсора и выделенных)
             if i == self.cursor_pos:
-                attr = curses.color_pair(1)
+                attr = curses.color_pair(1) # Курсор
             elif file_name in self.selected_files:
-                attr = curses.color_pair(5)
+                attr = curses.color_pair(5) # Выделенные
             else:
-                attr = curses.A_NORMAL
+                attr = curses.A_NORMAL # По умолчанию для строки, если не курсор и не выделено
 
+            # Определяем цвет текста файла
             if os.path.isdir(full_path) or file_name == "..":
-                file_attr = curses.color_pair(2)
+                file_attr = curses.color_pair(2)  # Директории
             elif os.path.islink(full_path):
-                file_attr = curses.color_pair(4)
+                file_attr = curses.color_pair(4)  # Ссылки
             elif os.access(full_path, os.X_OK):
-                file_attr = curses.color_pair(3)
+                file_attr = curses.color_pair(3)  # Исполняемые
             else:
-                file_attr = curses.A_NORMAL
-
+                file_attr = curses.color_pair(10) # <--- ЗДЕСЬ назначаем цвет для обычных файлов
             # Отрисовка строки
             try:
                 if i == self.cursor_pos or file_name in self.selected_files:
@@ -107,7 +124,7 @@ class FileManager:
         # Строка подсказок
         help_text = " ←: Back | →: Open/Run | q: Quit | c: Copy (to clipboard) | m: Cut (to clipboard) | p: Paste | x: Clear clipboard | d: Delete | r: Rename | .: Show hidden | Space: Select "
         try:
-            self.stdscr.addstr(self.height-2, 0, help_text[:self.width-1], curses.A_REVERSE)
+            self.stdscr.addstr(self.height-2, 0, help_text[:self.width-1], curses.A_NORMAL)
         except curses.error:
             pass
 
@@ -281,19 +298,45 @@ class FileManager:
         self.get_files()
 
     def open_file(self, full_path):
-        try:
-            curses.endwin()
-            if sys.platform.startswith("linux"):
-                subprocess.Popen(["xdg-open", full_path])
-            elif sys.platform == "darwin":  # macOS
-                subprocess.Popen(["open", full_path])
-            elif sys.platform.startswith("win"):
-                os.startfile(full_path)
-            else:
-                self.show_message("Неизвестная платформа: не знаю, как открыть файл")
-            curses.doupdate()
-        except Exception as e:
-            self.show_message(f"Ошибка при открытии файла: {e}")
+                try:
+                    # Закрываем окно curses, чтобы терминальный редактор правильно работал
+                    curses.endwin()
+            
+                    # Предпочитаем редактор из переменной окружения GFD_EDITOR,
+                    # затем EDITOR, затем пытаемся использовать 'micro' если он в PATH
+                    editor = os.environ.get('GFD_EDITOR') or os.environ.get('EDITOR') or None
+                    if editor and shutil.which(editor.split()[0]):
+                        # Если в EDITOR стоит команда с аргументами — примитивно разбиваем по пробелу
+                        cmd = editor.split() + [full_path]
+                        subprocess.call(cmd)
+                    elif shutil.which('micro'):
+                        subprocess.call(['micro', full_path])
+                    else:
+                        # fallback на поведение по умолчанию (xdg-open / open / os.startfile)
+                        if sys.platform.startswith("linux"):
+                            subprocess.Popen(["xdg-open", full_path])
+                        elif sys.platform == "darwin":
+                            subprocess.Popen(["open", full_path])
+                        elif sys.platform.startswith("win"):
+                            os.startfile(full_path)
+                        else:
+                            # если платформа неизвестна, показываем сообщение (после восстановления curses)
+                            pass
+            
+                    # Попытка вернуть curses в нормальное состояние
+                    try:
+                        # иногда достаточно doupdate/refresh
+                        curses.doupdate()
+                    except Exception:
+                        pass
+            
+                except Exception as e:
+                    # Если ещё не вышли из curses, покажем сообщение внутри интерфейса
+                    try:
+                        self.show_message(f"Ошибка при открытии файла: {e}")
+                    except Exception:
+                        # как запасной вариант — напечатаем в stderr
+                        print(f"Ошибка при открытии файла: {e}", file=sys.stderr)
 
     def rename_item(self):
         if self.cursor_pos < len(self.files) and self.files[self.cursor_pos] != "..":
