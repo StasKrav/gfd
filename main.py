@@ -7,10 +7,13 @@ import curses
 import shutil
 import subprocess
 import locale
+import json
 from pathlib import Path
 
 # Файл для сохранения последнего посещенного каталога
 CD_FILE = os.path.expanduser("~/.tui_fm_last_dir")
+# Файл для сохранения позиций курсора по директориям
+CURSOR_POSITIONS_FILE = os.path.expanduser("~/.tui_fm_cursor_positions")
 
 # Включаем поддержку локали для корректного отображения Unicode (в том числе кириллицы)
 locale.setlocale(locale.LC_ALL, '')
@@ -25,6 +28,8 @@ class FileManager:
         self.files = []
         self.selected_files = set()
         self.show_hidden = False
+        # Словарь для хранения позиций курсора по директориям
+        self.cursor_positions = {}
         self.height, self.width = stdscr.getmaxyx()
         self.max_items = self.height - 5  # Оставляем место для заголовка, строки статуса и подсказок
         curses.curs_set(0)  # Скрываем курсор
@@ -58,6 +63,7 @@ class FileManager:
         self.clipboard = []  # список полных путей
         self.clipboard_action = None
 
+        self.load_cursor_positions()
         self.get_files()
 
     def get_files(self):
@@ -71,6 +77,42 @@ class FileManager:
             self.show_message("Ошибка доступа к директории")
             self.current_dir = os.path.dirname(self.current_dir)
             self.get_files()
+
+    def load_cursor_positions(self):
+        """Загружает сохраненные позиции курсора из файла."""
+        try:
+            if os.path.exists(CURSOR_POSITIONS_FILE):
+                with open(CURSOR_POSITIONS_FILE, 'r', encoding='utf-8') as f:
+                    self.cursor_positions = json.load(f)
+        except Exception:
+            self.cursor_positions = {}
+
+    def save_cursor_positions(self):
+        """Сохраняет текущие позиции курсора в файл."""
+        try:
+            with open(CURSOR_POSITIONS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(self.cursor_positions, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def save_current_cursor_position(self):
+        """Сохраняет текущую позицию курсора для текущей директории."""
+        self.cursor_positions[self.current_dir] = {
+            'cursor_pos': self.cursor_pos,
+            'offset': self.offset
+        }
+
+    def restore_cursor_position(self):
+        """Восстанавливает позицию курсора для текущей директории."""
+        if self.current_dir in self.cursor_positions:
+            saved_pos = self.cursor_positions[self.current_dir]
+            self.cursor_pos = min(saved_pos['cursor_pos'], len(self.files) - 1)
+            self.offset = saved_pos['offset']
+            # Корректируем offset если курсор не виден
+            if self.cursor_pos < self.offset:
+                self.offset = self.cursor_pos
+            elif self.cursor_pos >= self.offset + self.max_items:
+                self.offset = max(0, self.cursor_pos - self.max_items + 1)
 
     def draw(self):
         self.stdscr.clear()
@@ -227,6 +269,11 @@ class FileManager:
             self.open_selected_item()
 
         elif key == "q":
+            # Сохраняем текущую позицию курсора
+            self.save_current_cursor_position()
+            # Сохраняем все позиции в файл
+            self.save_cursor_positions()
+            
             # Сохраняем текущую директорию для cd on exit, только если она изменилась
             if self.current_dir != self.last_dir:
                 try:
@@ -245,8 +292,14 @@ class FileManager:
                     self.selected_files.add(fname)
 
         elif key == ".":
+            # Сохраняем текущую позицию курсора перед переключением
+            self.save_current_cursor_position()
+            
             self.show_hidden = not self.show_hidden
             self.get_files()
+            
+            # Восстанавливаем позицию курсора после обновления списка
+            self.restore_cursor_position()
 
         elif key == "r":
             self.rename_item()
@@ -284,18 +337,26 @@ class FileManager:
 
 
     def navigate_back(self):
+        # Сохраняем текущую позицию курсора перед возвратом
+        self.save_current_cursor_position()
+        
         parent_dir = os.path.dirname(self.current_dir)
         if parent_dir != self.current_dir:  # Проверяем, что мы не в корневой директории
             self.current_dir = parent_dir
-            self.cursor_pos = 0
-            self.offset = 0
             self.get_files()
+            
+            # Восстанавливаем позицию курсора для родительской директории
+            self.restore_cursor_position()
 
     def change_directory(self, path):
+        # Сохраняем текущую позицию курсора перед сменой директории
+        self.save_current_cursor_position()
+        
         self.current_dir = os.path.abspath(path)
-        self.cursor_pos = 0
-        self.offset = 0
         self.get_files()
+        
+        # Восстанавливаем позицию курсора для новой директории
+        self.restore_cursor_position()
 
     def open_file(self, full_path):
                 try:
@@ -519,5 +580,6 @@ def main(stdscr):
 
 if __name__ == "__main__":
     curses.wrapper(main)
+
 
 
