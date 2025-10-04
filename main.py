@@ -31,7 +31,7 @@ class FileManager:
         # Словарь для хранения позиций курсора по директориям
         self.cursor_positions = {}
         self.height, self.width = stdscr.getmaxyx()
-        self.max_items = self.height - 5  # Оставляем место для заголовка, строки статуса и подсказок
+        self.max_items = self.height - 3  # Оставляем место для заголовка и строки статуса
         curses.curs_set(0)  # Скрываем курсор
         curses.start_color()
         curses.use_default_colors()
@@ -117,7 +117,7 @@ class FileManager:
     def draw(self):
         self.stdscr.clear()
         self.height, self.width = self.stdscr.getmaxyx()
-        self.max_items = self.height - 5
+        self.max_items = self.height - 3
 
         # Заголовок + информация о буфере
         clipboard_info = ""
@@ -162,13 +162,6 @@ class FileManager:
                 pass
 
             line += 1
-
-        # Строка подсказок
-        help_text = " ←: Back | →: Open/Run | q: Quit | c: Copy (to clipboard) | m: Cut (to clipboard) | p: Paste | x: Clear clipboard | d: Delete | r: Rename | .: Show hidden | Space: Select "
-        try:
-            self.stdscr.addstr(self.height-2, 0, help_text[:self.width-1], curses.A_NORMAL)
-        except curses.error:
-            pass
 
         self.stdscr.refresh()
 
@@ -248,6 +241,71 @@ class FileManager:
         
             return "".join(buffer)
 
+    def show_help_popup(self):
+        """Отображает popup окно с помощью в центре экрана."""
+        # Определяем размеры popup окна
+        help_lines = [
+            "=== GFD - Файловый менеджер ===",
+            "",
+            "НАВИГАЦИЯ:",
+            "  ↑/↓     - Перемещение курсора",
+            "  ←       - Назад в родительскую директорию", 
+            "  →/Enter - Открыть файл/директорию",
+            "",
+            "ВЫДЕЛЕНИЕ:",
+            "  Space   - Выделить/снять выделение файла",
+            "",
+            "ОПЕРАЦИИ С ФАЙЛАМИ:",
+            "  c       - Копировать в буфер обмена",
+            "  m       - Вырезать в буфер обмена",
+            "  p       - Вставить из буфера обмена",
+            "  x       - Очистить буфер обмена",
+            "  d       - Удалить файл/директорию",
+            "  r       - Переименовать файл/директорию",
+            "  n       - Создать новый файл/директорию",
+            "",
+            "НАСТРОЙКИ:",
+            "  .       - Показать/скрыть скрытые файлы",
+            "",
+            "СИСТЕМА:",
+            "  h       - Показать эту справку",
+            "  q       - Выход из программы",
+            "",
+            "Нажмите любую клавишу для закрытия..."
+        ]
+        
+        # Вычисляем размеры окна
+        max_width = max(len(line) for line in help_lines) + 4
+        height = len(help_lines) + 2
+        
+        # Центрируем окно
+        start_y = max(0, (self.height - height) // 2)
+        start_x = max(0, (self.width - max_width) // 2)
+        
+        # Создаем окно помощи
+        help_win = curses.newwin(height, max_width, start_y, start_x)
+        help_win.border()
+        help_win.bkgd(' ', curses.color_pair(9))  # Используем цвет для сообщений
+        
+        # Заполняем окно текстом
+        for i, line in enumerate(help_lines):
+            try:
+                # Выравниваем по левому краю с отступом
+                x_pos = 2  # Отступ от левого края
+                help_win.addstr(i + 1, x_pos, line[:max_width-4])
+            except curses.error:
+                pass
+        
+        # Отображаем окно
+        help_win.refresh()
+        
+        # Ждем нажатия любой клавиши
+        self.stdscr.get_wch()
+        
+        # Очищаем окно
+        help_win.clear()
+        help_win.refresh()
+        del help_win
 
     def handle_input(self):
         key = self.stdscr.get_wch()
@@ -321,6 +379,9 @@ class FileManager:
 
         elif key == "n":
             self.create_new_item()
+
+        elif key == "?":
+            self.show_help_popup()
 
         return True
 
